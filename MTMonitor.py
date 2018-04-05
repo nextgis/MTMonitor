@@ -1,5 +1,6 @@
 # coding=utf-8
 import requests
+from requests.compat import urljoin
 from pyproj import Proj, transform
 import shapely
 from shapely.geometry import Polygon
@@ -9,6 +10,11 @@ import fiona
 from fiona.crs import from_epsg
 import json
 from datetime import datetime
+from MT_NGW_init_schemes import MT_NGW_init_schemes
+import random
+import time
+import os
+
 
 class MTMonitor():
 
@@ -70,15 +76,20 @@ class MTMonitor():
         :param time_period: Time to observe vessels in minutes
         """
 
+        request_time = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
 
         ##### EMULATION FOR TESTS
 
         if emulation:
-            vessels = [{"MMSI":"304010417","IMO":"9015462","SHIP_ID":"359396","LAT":"47.758499","LON":"-5.154223","SPEED":"74","HEADING":"329","COURSE":"327","STATUS":"0","TIMESTAMP":"2017-05-19T09:39:57","DSRC":"TER","UTC_SECONDS":"54"},
-                       {"MMSI":"215819000","IMO":"9034731","SHIP_ID":"150559","LAT":"47.926899","LON":"-5.531450","SPEED":"122","HEADING":"162","COURSE":"157","STATUS":"0","TIMESTAMP":"2017-05-19T09:44:27","DSRC":"TER","UTC_SECONDS":"28"},
-                       {"MMSI":"255925000","IMO":"9184433","SHIP_ID":"300518","LAT":"47.942631","LON":"-5.116510","SPEED":"79","HEADING":"316","COURSE":"311","STATUS":"0","TIMESTAMP":"2017-05-19T09:43:53","DSRC":"TER","UTC_SECONDS":"52"}]
+            vessels = []
+            for i in range(0,10,1):
+                x = random.uniform (58.3209,59.6744)
+                y = random.uniform(68.9573, 69.544)
+                vessel = {"MMSI":"304010417","IMO":"9015462","SHIP_ID":"359396","LAT":str(y),"LON":str(x),"SPEED":"74","HEADING":"329","COURSE":"327","STATUS":"0","TIMESTAMP":"2017-05-19T09:39:57","DSRC":"TER","UTC_SECONDS":"54"}
+                vessels.append(vessel)
 
             for vessel_new_response in vessels:
+                vessel_new_response['REQUEST_TIME'] = request_time
                 vessel_new_response['NEW'] = True
                 for vessel_last_response in self.last_vessels_response:
                     if vessel_new_response['SHIP_ID'] == vessel_last_response['SHIP_ID']:
@@ -88,6 +99,7 @@ class MTMonitor():
             return vessels
 
         ##### END EMULATION
+
 
 
 
@@ -126,8 +138,12 @@ class MTMonitor():
                             vessels_filtered.append(vessel)
 
 
+
+
         # Записать новый атрибут NEW для тех, которые уже были в last_vessels_response
+        # И заодно дописываем атрибут request_time
         for vessel_new_response in vessels_filtered:
+            vessel_new_response['REQUEST_TIME'] = request_time
             vessel_new_response['NEW'] = True
             for vessel_last_response in self.last_vessels_response:
                 if vessel_new_response['SHIP_ID'] == vessel_last_response['SHIP_ID']:
@@ -136,7 +152,7 @@ class MTMonitor():
         self.last_vessels_response = vessels_filtered
         return vessels_filtered
 
-    def export_vessels_to_file (self, output_file, output_type='GeoJSON'):
+    def export_vessels_to_file (self, output_file, output_type='GeoJSON', write_mode='NF'):
         """
         Записываем полученные объекты в файл
 
@@ -157,14 +173,31 @@ class MTMonitor():
                                         'TIMESTAMP': 'str',
                                         'DSRC': 'str',
                                         'UTC_SECONDS':'str',
-                                        'NEW': 'str'}}
+                                        'NEW': 'str',
+                                        'REQUEST_TIME': 'str'}}
 
-        output = fiona.open(output_file, 'w', driver=output_type, schema=output_schema, crs=from_epsg(4326))
+        if (not os.path.exists(output_file)) or (write_mode == 'NF') or (write_mode == 'RF'):
+            if os.path.exists(output_file):
+                os.remove(output_file)
+
+            output = fiona.open(output_file, 'w', driver=output_type, schema=output_schema, crs=from_epsg(4326))
+
+        elif write_mode == 'AF':
+            input = fiona.open(output_file,'r')
+            input_schema = input.schema.copy()
+            input_driver = input.driver.copy()
+            features = list(input.items())
+            input.close()
+            output = fiona.open(output_file, 'w', driver=input_driver, schema=input_schema, crs=from_epsg(4326))
+            output.write(features)
+        else:
+            print 'unsupported mode'
+            return
 
         for vessel in self.last_vessels_response:
-            #print vessel
-            coordinate = Point(float(vessel['LON']),float(vessel['LAT']))
-            #print float(vessel['LON'])
+            # print vessel
+            coordinate = Point(float(vessel['LON']), float(vessel['LAT']))
+            # print float(vessel['LON'])
             print mapping(coordinate)
             properties = {'LAT': vessel['LAT'],
                           'LON': vessel['LON'],
@@ -178,20 +211,39 @@ class MTMonitor():
                           'TIMESTAMP': vessel['TIMESTAMP'],
                           'DSRC': vessel['DSRC'],
                           'UTC_SECONDS': vessel['UTC_SECONDS'],
-                          'NEW': str(vessel['NEW'])}
+                          'NEW': str(vessel['NEW']),
+                          'REQUEST_TIME': str(vessel['REQUEST_TIME'])}
 
             output.write({'geometry': mapping(coordinate), 'properties': properties})
 
         output.close()
 
-    def export_vessels_to_web(self, nextgis_web_api_options):
+
+
+
+
+
+    def export_vessels_to_web(self, nextgis_web_api_options, mode='rewrite'):
         """
         Экспортируем полученные объекты в NextGIS Web
 
-        :param nextgis_web_api_options: All necessary API options
+        :param mode: 'rewrite' or 'append'.
+        :param nextgis_web_api_options: All necessary API options as dict: {'url':'', 'username':'', 'password':'', 'resource_id': 0}
         """
 
-    def automated_vessels_to_file (self, output_file, write_mode = 'NF', output_type='GeoJSON', run_period=None, time_period=None):
+        if mode == 'rewrite':
+            self.__delete_all_features_from_NGW_resource(nextgis_web_api_options)
+            for vessel in self.last_vessels_response:
+                vessel_ngw = self.__describe_vessel_for_NGW(vessel)
+                self.__add_feature_to_NGW_resource(vessel_ngw, nextgis_web_api_options)
+
+        elif mode == 'append':
+            for vessel in self.last_vessels_response:
+                vessel_ngw = self.__describe_vessel_for_NGW(vessel)
+                self.__add_feature_to_NGW_resource(vessel_ngw, nextgis_web_api_options)
+
+
+    def automated_vessels_to_file (self, output_file, write_mode = 'NF', output_type='GeoJSON', run_period=None, time_period=None, emulation=False):
         """
         Запускаем периодичное получение данных и их запись в файл(ы).
         Три режима создания файлов:
@@ -207,6 +259,17 @@ class MTMonitor():
         :param output_file: Output file(s) path
         :param output_type: Output file(s) type
         """
+
+        start_time = time.time()
+        while True:
+            print 'Performing request...'
+            self.get_vessels(time_period=time_period, emulation=emulation)
+            time.sleep(run_period*60.0 - ((time.time() - start_time) % run_period*60.0))
+
+            if write_mode == 'NF':
+                new_name = 0
+            self.export_vessels_to_file(output_file,)
+
 
 
     def automated_vessels_to_web(self, nextgis_web_api_options, run_period=None, time_period=None):
@@ -274,6 +337,12 @@ class MTMonitor():
 
         return new_dataset
 
+    def __reproject_point (self, x, y, source_crs_epsg, dest_crs_epsg):
+        source = Proj(init=source_crs_epsg)
+        dest = Proj(init=dest_crs_epsg)
+        dest_x, dest_y = transform(source, dest, x, y)
+        return dest_x, dest_y
+
     def __get_bounds_from_coordinates(self, coordinates):
         x_coords = [item[0] for item in coordinates]
         y_coords = [item[1] for item in coordinates]
@@ -284,9 +353,75 @@ class MTMonitor():
         polygon = shapely.geometry.Polygon(polygon_coordinates)
         return polygon.contains(point)
 
+    def __add_feature_to_NGW_resource(self, feature, nextgis_web_api_options):
+        url = urljoin(nextgis_web_api_options['url'],'api/resource/%s/feature/' % nextgis_web_api_options['resource_id'])
+        r = requests.post(url, data=feature, auth=(nextgis_web_api_options['user'], nextgis_web_api_options['password']))
+        print r.text
+        r_loaded = json.loads(r.text)
+        return r_loaded
 
-#a = MTMonitor('c889f60d987ade091f0f92c0d714eb6d094302f9',mode='Predefined')
-#a.get_vessels(200, emulation=False)
+    def __delete_all_features_from_NGW_resource(self, nextgis_web_api_options):
+        url = urljoin(nextgis_web_api_options['url'],'api/resource/%s/feature/' % nextgis_web_api_options['resource_id'])
+        r = requests.delete(url, auth=(nextgis_web_api_options['user'], nextgis_web_api_options['password']))
+        print r.text
+        r_loaded = json.loads(r.text)
+        return r_loaded
+
+    def __get_features_from_NGW_resource(self, nextgis_web_api_options):
+        url = urljoin(nextgis_web_api_options['url'],'api/resource/%s/feature/' % nextgis_web_api_options['resource_id'])
+        r = requests.get(url, auth=(nextgis_web_api_options['user'], nextgis_web_api_options['password']))
+        print r.text
+        r_loaded = json.loads(r.text)
+        return r_loaded
+
+    def __describe_vessel_for_NGW(self, vessel_record, crs_id='epsg:3857'):
+        x, y = self.__reproject_point(float(vessel_record['LON']), float(vessel_record['LAT']), 'epsg:4326', crs_id)
+        geom = 'POINT (%s %s)' % (x, y)
+        fields = vessel_record
+        feature = {'extensions':{'attachment': None, 'description': None}, 'fields': fields, 'geom': geom}
+        return json.dumps(feature)
+
+    def __compare_features_are_equal(self, feature1, feature2):
+        # Maybe some more deep comparison?
+        if feature1 == feature2:
+            return True
+        else:
+            return False
+
+    def init_NGW_resource_for_vessels(self, nextgis_web_api_options, display_name, keyname):
+        scheme_init = MT_NGW_init_schemes(nextgis_web_api_options['resource_id'], display_name, keyname)
+        resource = scheme_init.get_init_vector_layer()
+        url = urljoin(nextgis_web_api_options['url'],'api/resource/')
+        r = requests.post(url, data = resource, auth=(nextgis_web_api_options['user'], nextgis_web_api_options['password']))
+        print r.text
+        r_loaded = json.loads(r.text)
+        new_resource_id = r_loaded['id']
+
+        style = scheme_init.get_init_mapserver_style(new_resource_id)
+        r = requests.post(url, data=style, auth=(nextgis_web_api_options['user'], nextgis_web_api_options['password']))
+        print r.text
+        r_loaded = json.loads(r.text)
+
+        return r_loaded
+
+
+#initer = MT_NGW_init_schemes(0,'a','b')
+#initer.get_init_mapserver_style(4)
+
+NGW_options = {'user':'administrator','password':'cedutecedute32167','url':'http://ekazakov.nextgis.com','resource_id':25}
+
+a = MTMonitor('c889f60d987ade091f0f92c0d714eb6d094302f9',mode='Predefined')
+a.get_vessels(emulation=True)
+a.export_vessels_to_web(mode='rewrite',nextgis_web_api_options=NGW_options)
+
+
+#a.init_NGW_resource_for_vessels({'user':'administrator','password':'cedutecedute32167','url':'http://ekazakov.nextgis.com','resource_id':0}, 'monya', 'manya')
+#a.delete_all_features_from_NGW_resource({'user':'administrator','password':'cedutecedute32167','url':'http://ekazakov.nextgis.com','resource_id':12})
+
+#a.get_vessels(200, emulation=True)
+#vessel0 = a.last_vessels_response[0]
+#described_vessel0 = a.describe_vessel_for_NGW(vessel0)
+#print a.add_feature_to_NGW_resource(described_vessel0,{'user':'administrator','password':'cedutecedute32167','url':'http://ekazakov.nextgis.com','resource_id':25})
 #a.export_vessels_to_file('/home/silent/test_MT2.geojson')
 #b = a.get_vessels(200, emulation=True)
 #print b
