@@ -28,7 +28,7 @@ monitor = MTMonitor('<your API key>',mode='Predefined', monitoring_area_source='
 
 Для работы с PS05 используйте значение поля mode='Predifined'
 
-Для работы с PS05 используйте значение поля mode='Custom'
+Для работы с PS06 используйте значение поля mode='Custom'
 
 **Важно!** Если при работе с predifined area (PS05) указан OGR-источник данных с границей (monitoring_area_source), то полученные данные будут обрезаться по этим границам. OGR-источник должен содержать полигоны и может быть в любой системе координат с определенным кодом EPSG. Полигонов в наборе может быть любое число.
 
@@ -48,5 +48,12 @@ print vessels # Аналогичное содержание у monitor.last_vess
 ```
 
 Каждое судно представляет собой словарь с полями:
-'LAT', 'LON', 'SHIP_ID', 'MMSI', 'IMO', 'SPEED', 'HEADING', 'COURSE', 'STATUS', 'TIMESTAMP', 'DSRC', 'UTC_SECONDS', 'NEW',
-'REQUEST_TIME'
+'LAT', 'LON', 'SHIP_ID', 'MMSI', 'IMO', 'SPEED', 'HEADING', 'COURSE', 'STATUS', 'TIMESTAMP', 'DSRC', 'UTC_SECONDS', 'NEW','REQUEST_TIME'
+
+Все поля наследуются из ответа API MarineTraffic, кроме двух:
+
+NEW - при работе класса в автоматическом режиме помечает как NEW те судна, которых не было в ответе на прошлый запрос
+
+REQUEST_TIME - время UTC, когда был отправлен запрос к API. Полезно, когда все ответы дополняются друг к другу.
+
+

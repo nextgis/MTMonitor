@@ -1,4 +1,21 @@
 # coding=utf-8
+
+#==============================================================================
+#title           :MTMonitor.py
+#description     :Class providing interface to MarineTraffic.com API (PS05 and PS06)
+#author          :ekazakov (silenteddie@gmail.com)
+#date            :2018.04
+#version         :0.1
+#usage           :see on github
+#notes           :
+#python_version  :2.7
+#==============================================================================
+
+import random
+import time
+import os
+import json
+from datetime import datetime
 import requests
 from requests.compat import urljoin
 from pyproj import Proj, transform
@@ -8,13 +25,7 @@ from shapely.geometry import Point
 from shapely.geometry import mapping
 import fiona
 from fiona.crs import from_epsg
-import json
-from datetime import datetime
 from MT_NGW_init_schemes import MT_NGW_init_schemes
-import random
-import time
-import os
-
 
 class MTMonitor():
 
@@ -27,20 +38,34 @@ class MTMonitor():
 
     def __init__(self, MT_API_Key, mode='Predefined', monitoring_area_source=None):
         """
-        Инициализируем класс через ключ АПИ и путь к набору данных с границами, внутри которых наблюдаем суда
-        Сразу делаем следующую работу:
-        1. Извлекаем все объекты из набора геоданных - получаем их список (используем пакет Fiona)
-        2. Перепроецируем их в WGS84 (пакеты Fiona, PyProj)
-        3. Для каждого объекта в отдельности считаем bounds в WGS84
-        4. Храним всё это дело в свойствах экземпляра класса
-        5. Ключ API тоже записываем в свойства
+        Class initialization.
+        Inputs are MarineTraffic API Key, mode and (optionally) OGR source with region of interest
+        Modes are:
+
+        1. Predefined - For PS05 API Service
+        https://www.marinetraffic.com/ru/ais-api-services/detail/ps05/vessel-positions-in-a-predefined-area/
+
+        2. Custom - For PS06 API Service
+        https://www.marinetraffic.com/ru/ais-api-services/detail/ps06/vessel-positions-in-a-custom-area/
+
+        OGR source could be any type supported by Fiona lib:
+        'ESRI Shapefile', 'MapInfo File', 'GeoJSON', 'PDS', 'FileGDB',
+        'GPX', 'DXF', 'GMT', 'GPKG', 'BNA', 'GPSTrackMaker'
+        Allowed any SRS with epsg code.
+
+        If monitoring area OGR source specified, all vessels will be filtered by it.
+
+        :param mode: Mode for interacting with MarineTraffic
+        :type mode: str
 
         :param monitoring_area_source: Source for input geodata
-        :param MT_API_Key: API Key for MarineTraffic.com API
+        :type monitoring_area_source: str
+
+        :param MT_API_Key: API Key for MarineTraffic.com API Service
+        :type MT_API_Key: str
         """
 
         self.MT_API_Key = MT_API_Key
-        # TODO: Check if API Key is valid
 
         if mode not in ['Predefined','Custom']:
             print 'Invalid mode. Valid options are: Predefined, Custom. Auto set to Predefined'
@@ -62,21 +87,26 @@ class MTMonitor():
                 self.monitoring_areas.append({'geometry':feature,'bounds':self.__get_bounds_from_coordinates(feature)})
 
 
-    def get_vessels(self, time_period=None, emulation=True):
+    def get_vessels(self, time_period=None, emulation=False):
         """
-        Собственно, получаем список судов. Здесь происходит следующая работа:
-        1. Берём список регионов, полученных на этапе инициализации
-        2. Для каждого берём bounds, формируем запрос к API с периодом и пространствеными границами
-        ! Важно. Поскольку стоимость запроса определяется исходя из количества возвращенных записей, на количестве
-        запросов можно не экономить, а экономить на общей опрашиваемой площади
-        3. Результаты запроса обрезаем по настоящим границам наших объектов (а пришли они в bounds)
-        4. Возвращаем json с итоговым списком полученных судов (или храним в свойстве экземпляра класса,
-        например self.last_vessels_response)
+        Interaction with MarineTraffic API
+
+        Performing request with defined during initialization Mode and API Key.
+        If emulation is True, random vessels generated
+
+        :param emulation: Generate vessels without interacting with API (for tests)
+        :type emulation: bool
 
         :param time_period: Time to observe vessels in minutes
+        :type time_period: int
+
+        :return: filtered list of vessels as list of dicts
         """
 
         request_time = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
+        vessels_filtered = []
+        if not time_period:
+            time_period = self.default_time_period
 
         ##### EMULATION FOR TESTS
 
@@ -88,60 +118,52 @@ class MTMonitor():
                 vessel = {"MMSI":"304010417","IMO":"9015462","SHIP_ID":"359396","LAT":str(y),"LON":str(x),"SPEED":"74","HEADING":"329","COURSE":"327","STATUS":"0","TIMESTAMP":"2017-05-19T09:39:57","DSRC":"TER","UTC_SECONDS":"54"}
                 vessels.append(vessel)
 
-            for vessel_new_response in vessels:
-                vessel_new_response['REQUEST_TIME'] = request_time
-                vessel_new_response['NEW'] = True
-                for vessel_last_response in self.last_vessels_response:
-                    if vessel_new_response['SHIP_ID'] == vessel_last_response['SHIP_ID']:
-                        vessel_new_response['NEW'] = False
-
-            self.last_vessels_response = vessels
-            return vessels
-
-        ##### END EMULATION
-
-
-
-
-        if not time_period:
-            time_period = self.default_time_period
-
-        vessels_filtered = []
-
-        if self.mode == 'Predefined':
-            vessels = self.__marine_traffic_vp_in_predifined_area_request(time_period)
             if self.monitoring_areas:
                 for area in self.monitoring_areas:
-                    print 'Vessels:'
-                    print vessels
+                    #print 'Vessels:'
+                    #print vessels
                     for vessel in vessels:
                         if self.__point_inside_polygon(float(vessel['LON']), float(vessel['LAT']), area['geometry']):
                             vessels_filtered.append(vessel)
             else:
                 vessels_filtered = vessels
 
+        ##### END EMULATION
 
-        elif self.mode == 'Custom':
-            if not self.monitoring_areas:
-                print 'Monitoring area must be specified. Provide it with option monitoring_area_source while' \
-                      'class object initialization'
-                return vessels_filtered
-            else:
-                for area in self.monitoring_areas:
-                    vessels = self.__marine_traffic_vp_in_custom_area_request(time_period,
-                                                                       area['bounds']['y_min'],
-                                                                       area['bounds']['y_max'],
-                                                                       area['bounds']['x_min'],
-                                                                       area['bounds']['x_max'])
-                    for vessel in vessels:
-                        if self.__point_inside_polygon(float(vessel['LON']), float(vessel['LAT']), area['geometry']):
-                            vessels_filtered.append(vessel)
+        else:
+
+            if self.mode == 'Predefined':
+                vessels = self.__marine_traffic_vp_in_predifined_area_request(time_period)
+                if self.monitoring_areas:
+                    for area in self.monitoring_areas:
+                        #print 'Vessels:'
+                        #print vessels
+                        for vessel in vessels:
+                            if self.__point_inside_polygon(float(vessel['LON']), float(vessel['LAT']), area['geometry']):
+                                vessels_filtered.append(vessel)
+                else:
+                    vessels_filtered = vessels
+
+            elif self.mode == 'Custom':
+                if not self.monitoring_areas:
+                    print 'Monitoring area must be specified. Provide it with option monitoring_area_source while' \
+                          'class object initialization'
+                    return vessels_filtered
+                else:
+                    for area in self.monitoring_areas:
+                        vessels = self.__marine_traffic_vp_in_custom_area_request(time_period,
+                                                                           area['bounds']['y_min'],
+                                                                           area['bounds']['y_max'],
+                                                                           area['bounds']['x_min'],
+                                                                           area['bounds']['x_max'])
+                        for vessel in vessels:
+                            if self.__point_inside_polygon(float(vessel['LON']), float(vessel['LAT']), area['geometry']):
+                                vessels_filtered.append(vessel)
 
 
 
 
-        # Записать новый атрибут NEW для тех, которые уже были в last_vessels_response
-        # И заодно дописываем атрибут request_time
+        # Writing attributes NEW for new vessels and REQUEST_TIME
         for vessel_new_response in vessels_filtered:
             vessel_new_response['REQUEST_TIME'] = request_time
             vessel_new_response['NEW'] = True
@@ -152,12 +174,28 @@ class MTMonitor():
         self.last_vessels_response = vessels_filtered
         return vessels_filtered
 
-    def export_vessels_to_file (self, output_file, output_type='GeoJSON', write_mode='NF'):
+    def export_vessels_to_file (self, output_file, output_type='GeoJSON', write_mode='new'):
         """
-        Записываем полученные объекты в файл
+        Exporting result of last get_vessels call to vector file
+
+        output_type could be any type supported by Fiona lib:
+        'ESRI Shapefile', 'MapInfo File', 'GeoJSON', 'PDS', 'FileGDB',
+        'GPX', 'DXF', 'GMT', 'GPKG', 'BNA', 'GPSTrackMaker'
+
+        write_mode could be one of:
+        1. new - new file will be created
+        2. rewrite - existing file will be rewrited
+        (for manual call 1 and 2 are equal)
+        3. append - append new vessels to existing file
 
         :param output_file: Path to output file
+        :type output_file: str
+
         :param output_type: Type of output file
+        :type output_type: str
+
+        :param write_mode: Exporting mode
+        :type write_mode: str
         """
 
         output_schema = {'geometry': 'Point',
@@ -176,20 +214,22 @@ class MTMonitor():
                                         'NEW': 'str',
                                         'REQUEST_TIME': 'str'}}
 
-        if (not os.path.exists(output_file)) or (write_mode == 'NF') or (write_mode == 'RF'):
+        if (not os.path.exists(output_file)) or (write_mode == 'new') or (write_mode == 'rewrite'):
             if os.path.exists(output_file):
                 os.remove(output_file)
 
             output = fiona.open(output_file, 'w', driver=output_type, schema=output_schema, crs=from_epsg(4326))
 
-        elif write_mode == 'AF':
+        elif write_mode == 'append':
             input = fiona.open(output_file,'r')
             input_schema = input.schema.copy()
-            input_driver = input.driver.copy()
+            input_driver = input.driver
             features = list(input.items())
             input.close()
+            os.remove(output_file)
             output = fiona.open(output_file, 'w', driver=input_driver, schema=input_schema, crs=from_epsg(4326))
-            output.write(features)
+            for feature in features:
+                output.write(feature[1])
         else:
             print 'unsupported mode'
             return
@@ -198,7 +238,7 @@ class MTMonitor():
             # print vessel
             coordinate = Point(float(vessel['LON']), float(vessel['LAT']))
             # print float(vessel['LON'])
-            print mapping(coordinate)
+            #print mapping(coordinate)
             properties = {'LAT': vessel['LAT'],
                           'LON': vessel['LON'],
                           'SHIP_ID': vessel['SHIP_ID'],
@@ -218,14 +258,21 @@ class MTMonitor():
 
         output.close()
 
-
-
-
-
-
     def export_vessels_to_web(self, nextgis_web_api_options, mode='rewrite'):
         """
-        Экспортируем полученные объекты в NextGIS Web
+        Export vessels NextGIS Web
+
+        nextgis_web_api_options - dictionary, containing all information about NGW connection. Keys are:
+        1. 'user' - NGW username (i.e. administrator)
+        2. 'password' - NGW password
+        3. 'url' - NGW url (i.e. http://ekazakov.nextgis.com/)
+        4. 'resource_id' - id of resource, where vessels vector data are stored (i.e. 25)
+        ! resource must have certain structure. You can initializate it with sample Shapefile or with
+        self.init_NGW_resource_for_vessels function
+
+        mode defines behaviour of exporter. Two ways are supported:
+        1. rewrite - all existing in resource features will be deleted, then write new vessels
+        2. append - append new vessels to existing features
 
         :param mode: 'rewrite' or 'append'.
         :param nextgis_web_api_options: All necessary API options as dict: {'url':'', 'username':'', 'password':'', 'resource_id': 0}
@@ -243,68 +290,169 @@ class MTMonitor():
                 self.__add_feature_to_NGW_resource(vessel_ngw, nextgis_web_api_options)
 
 
-    def automated_vessels_to_file (self, output_file, write_mode = 'NF', output_type='GeoJSON', run_period=None, time_period=None, emulation=False):
+    def automated_vessels_to_file (self, output_file, write_mode = 'new', output_type='GeoJSON', run_period=None, time_period=None, emulation=False):
         """
-        Запускаем периодичное получение данных и их запись в файл(ы).
-        Три режима создания файлов:
-        NF (New File) - на каждый запрос создается новый файл с отметкой времени в названии
-        AF (Append File) - на каждый запрос в файл дописываются данные
-        RF (Rewrite File) - на каждый запрос файл создаётся заново
+        Launching periodical requesting vessels and writing them to file
 
-        Конфигурируем частоту запуска и обзор по времени
+        output_type could be any type supported by Fiona lib:
+        'ESRI Shapefile', 'MapInfo File', 'GeoJSON', 'PDS', 'FileGDB',
+        'GPX', 'DXF', 'GMT', 'GPKG', 'BNA', 'GPSTrackMaker'
+
+        run_period - time in minutes before function launches (i.e. 2)
+
+        Three write_modes supported:
+        1. new - will create new file with unique name everytime. To basename of output_file added timestamp
+        2. rewrite - each time rewriting one file (output_file)
+        3. append - append new vessels to existing features of output_file
+
+        :param emulation: Emulate vessels instead of API requests
+        :type emulation bool
 
         :param run_period: How often to run method
+        :type run_period: int
+
         :param time_period: Time to observe vessels in minutes
+        :type time_period: int
+
         :param write_mode: Mode of writing new data
+        :type write_mode: str
+
         :param output_file: Output file(s) path
+        :type output_file: str
+
         :param output_type: Output file(s) type
+        :type output_type: str
         """
 
         start_time = time.time()
         while True:
             print 'Performing request...'
             self.get_vessels(time_period=time_period, emulation=emulation)
-            time.sleep(run_period*60.0 - ((time.time() - start_time) % run_period*60.0))
 
-            if write_mode == 'NF':
-                new_name = 0
-            self.export_vessels_to_file(output_file,)
+            if write_mode == 'new':
+                now = datetime.utcnow().strftime('%Y%m%dT%H%M%S')
+
+                new_name = os.path.join(os.path.dirname(output_file),
+                                        '%s_%s.%s' % (os.path.basename(output_file).split('.')[0],
+                                                      now,
+                                                      os.path.basename(output_file).split('.')[1]))
+
+                self.export_vessels_to_file(new_name, output_type=output_type, write_mode=write_mode)
+
+            elif write_mode == 'append':
+                self.export_vessels_to_file(output_file, output_type=output_type, write_mode=write_mode)
+            elif write_mode == 'rewrite':
+                self.export_vessels_to_file(output_file, output_type=output_type, write_mode=write_mode)
+            else:
+                print 'Unsupported mode'
+                break
+
+            time.sleep(run_period * 60.0 - ((time.time() - start_time) % (run_period * 60.0)))
 
 
 
-    def automated_vessels_to_web(self, nextgis_web_api_options, run_period=None, time_period=None):
+    def automated_vessels_to_web(self, nextgis_web_api_options, run_period=None, time_period=None, write_mode='rewrite', emulation=False):
         """
-        Аналогично автоматически запускаем запись данных черех API NextGIS Web
+        Launching periodical requesting vessels and writing them to NGW
+
+        nextgis_web_api_options - dictionary, containing all information about NGW connection. Keys are:
+        1. 'user' - NGW username (i.e. administrator)
+        2. 'password' - NGW password
+        3. 'url' - NGW url (i.e. http://ekazakov.nextgis.com/)
+        4. 'resource_id' - id of resource, where vessels vector data are stored (i.e. 25)
+        ! resource must have certain structure. You can initializate it with sample Shapefile or with
+        self.init_NGW_resource_for_vessels function
+
+        run_period - time in minutes before function launches (i.e. 2)
+
+        Two write_modes supported:
+        1. rewrite - each time rewriting all features in resource
+        2. append - each time appending new vessels to resource
+
+        :param write_mode: Mode of writing new data
+        :type write_mode: str
+
+        :param emulation: Emulate vessels instead of API requests
+        :type emulation bool
 
         :param nextgis_web_api_options: All necessary API options
+        :type nextgis_web_api_options: dict
+
         :param run_period:  How often to run method
+        :type run_period: int
+
         :param time_period: Time to observe vessels in minutes
+        :type time_period: int
         """
 
+        start_time = time.time()
+        while True:
+            print 'Performing request...'
+            self.get_vessels(time_period=time_period, emulation=emulation)
+
+            self.export_vessels_to_web(nextgis_web_api_options, write_mode)
+
+            time.sleep(run_period * 60.0 - ((time.time() - start_time) % (run_period * 60.0)))
+
+    def init_NGW_resource_for_vessels(self, nextgis_web_api_options, display_name, keyname):
+        """
+        Initialization of new resource in NGW with scheme for vessels storing
+
+        nextgis_web_api_options - dictionary, containing all information about NGW connection. Keys are:
+        1. 'user' - NGW username (i.e. administrator)
+        2. 'password' - NGW password
+        3. 'url' - NGW url (i.e. http://ekazakov.nextgis.com/)
+        4. 'resource_id' - id of PARENT resource, where vessels vector resource will be CREATED (i.e. 0)
+
+        This method will create two new resources:
+        1. Vector layer as a child of parent with given 'resource_id'
+        2. Simple style as a child of new vector layer. You can change default style in MT_NGW_init_schemes.py
+
+        :param nextgis_web_api_options: All necessary API options
+        :type nextgis_web_api_options: dict
+
+        :param display_name: display name for new vector layer
+        :type display_name: str
+
+        :param keyname: keyname for new vector layer
+        :type keyname: str
+        :return: answer of NGW API
+        """
+        scheme_init = MT_NGW_init_schemes(nextgis_web_api_options['resource_id'], display_name, keyname)
+        resource = scheme_init.get_init_vector_layer()
+        url = urljoin(nextgis_web_api_options['url'], 'api/resource/')
+        r = requests.post(url, data=resource,
+                          auth=(nextgis_web_api_options['user'], nextgis_web_api_options['password']))
+        # print r.text
+        r_loaded = json.loads(r.text)
+        new_resource_id = r_loaded['id']
+
+        style = scheme_init.get_init_mapserver_style(new_resource_id)
+        r = requests.post(url, data=style,
+                          auth=(nextgis_web_api_options['user'], nextgis_web_api_options['password']))
+        # print r.text
+        r_loaded = json.loads(r.text)
+
+        return r_loaded
 
 
     #### Service private methods
 
     def __marine_traffic_vp_in_custom_area_request (self, timespan, MINLAT, MAXLAT, MINLON, MAXLON):
-        print '%s/%s/MINLAT:%s/MAXLAT:%s/MINLON:%s/MAXLON:%s/timespan:%s/protocol:jsono' % (self.MT_API_gate, self.MT_API_Key, MINLAT, MAXLAT, MINLON, MAXLON, timespan)
+        #print '%s/%s/MINLAT:%s/MAXLAT:%s/MINLON:%s/MAXLON:%s/timespan:%s/protocol:jsono' % (self.MT_API_gate, self.MT_API_Key, MINLAT, MAXLAT, MINLON, MAXLON, timespan)
         r_loaded = []
         r = requests.get('%s/%s/MINLAT:%s/MAXLAT:%s/MINLON:%s/MAXLON:%s/timespan:%s/protocol:json' % (self.MT_API_gate, self.MT_API_Key, MINLAT, MAXLAT, MINLON, MAXLON, timespan))
         r_loaded = json.loads(r.text)
-        print r_loaded
+        #print r_loaded
         return r_loaded
 
-        # [{"MMSI":"304010417","IMO":"9015462","SHIP_ID":"359396","LAT":"47.758499","LON":"-5.154223","SPEED":"74","HEADING":"329","COURSE":"327","STATUS":"0","TIMESTAMP":"2017-05-19T09:39:57","DSRC":"TER","UTC_SECONDS":"54"},
-        # {"MMSI":"215819000","IMO":"9034731","SHIP_ID":"150559","LAT":"47.926899","LON":"-5.531450","SPEED":"122","HEADING":"162","COURSE":"157","STATUS":"0","TIMESTAMP":"2017-05-19T09:44:27","DSRC":"TER","UTC_SECONDS":"28"},
-        # {"MMSI":"255925000","IMO":"9184433","SHIP_ID":"300518","LAT":"47.942631","LON":"-5.116510","SPEED":"79","HEADING":"316","COURSE":"311","STATUS":"0","TIMESTAMP":"2017-05-19T09:43:53","DSRC":"TER","UTC_SECONDS":"52"}]
-        # https://services.marinetraffic.com/api/exportvessels/v:8/8205c862d0572op1655989d939f1496c092ksvs4/MINLAT:38.20882/MAXLAT:40.24562/MINLON:-6.7749/MAXLON:-4.13721/timespan:10/protocol:json
-
     def __marine_traffic_vp_in_predifined_area_request(self, timespan):
-        print '%s/%s/timespan:%s/protocol:jsono' % (self.MT_API_gate, self.MT_API_Key, timespan)
+        #print '%s/%s/timespan:%s/protocol:jsono' % (self.MT_API_gate, self.MT_API_Key, timespan)
         r_loaded = []
         r = requests.get('%s/%s/timespan:%s/protocol:json' % (self.MT_API_gate, self.MT_API_Key, timespan))
-        print r.text
+        #print r.text
         r_loaded = json.loads(r.text)
-        print r_loaded
+        #print r_loaded
         return r_loaded
 
 
@@ -356,21 +504,21 @@ class MTMonitor():
     def __add_feature_to_NGW_resource(self, feature, nextgis_web_api_options):
         url = urljoin(nextgis_web_api_options['url'],'api/resource/%s/feature/' % nextgis_web_api_options['resource_id'])
         r = requests.post(url, data=feature, auth=(nextgis_web_api_options['user'], nextgis_web_api_options['password']))
-        print r.text
+        #print r.text
         r_loaded = json.loads(r.text)
         return r_loaded
 
     def __delete_all_features_from_NGW_resource(self, nextgis_web_api_options):
         url = urljoin(nextgis_web_api_options['url'],'api/resource/%s/feature/' % nextgis_web_api_options['resource_id'])
         r = requests.delete(url, auth=(nextgis_web_api_options['user'], nextgis_web_api_options['password']))
-        print r.text
+        #print r.text
         r_loaded = json.loads(r.text)
         return r_loaded
 
     def __get_features_from_NGW_resource(self, nextgis_web_api_options):
         url = urljoin(nextgis_web_api_options['url'],'api/resource/%s/feature/' % nextgis_web_api_options['resource_id'])
         r = requests.get(url, auth=(nextgis_web_api_options['user'], nextgis_web_api_options['password']))
-        print r.text
+        #print r.text
         r_loaded = json.loads(r.text)
         return r_loaded
 
@@ -388,31 +536,21 @@ class MTMonitor():
         else:
             return False
 
-    def init_NGW_resource_for_vessels(self, nextgis_web_api_options, display_name, keyname):
-        scheme_init = MT_NGW_init_schemes(nextgis_web_api_options['resource_id'], display_name, keyname)
-        resource = scheme_init.get_init_vector_layer()
-        url = urljoin(nextgis_web_api_options['url'],'api/resource/')
-        r = requests.post(url, data = resource, auth=(nextgis_web_api_options['user'], nextgis_web_api_options['password']))
-        print r.text
-        r_loaded = json.loads(r.text)
-        new_resource_id = r_loaded['id']
-
-        style = scheme_init.get_init_mapserver_style(new_resource_id)
-        r = requests.post(url, data=style, auth=(nextgis_web_api_options['user'], nextgis_web_api_options['password']))
-        print r.text
-        r_loaded = json.loads(r.text)
-
-        return r_loaded
-
 
 #initer = MT_NGW_init_schemes(0,'a','b')
 #initer.get_init_mapserver_style(4)
 
 NGW_options = {'user':'administrator','password':'cedutecedute32167','url':'http://ekazakov.nextgis.com','resource_id':25}
 
-a = MTMonitor('c889f60d987ade091f0f92c0d714eb6d094302f9',mode='Predefined')
-a.get_vessels(emulation=True)
-a.export_vessels_to_web(mode='rewrite',nextgis_web_api_options=NGW_options)
+a = MTMonitor('c889f60d987ade091f0f92c0d714eb6d094302f9',mode='Predefined', monitoring_area_source='data/1694.geojson')
+#a.automated_vessels_to_web(NGW_options, run_period=0.5, emulation=True, write_mode='rewrite')
+#a.automated_vessels_to_file('/home/silent/mt_auto.geojson',write_mode='RF',run_period=0.5, emulation=True)
+
+
+print a.get_vessels(emulation=True)
+
+#a.export_vessels_to_file('/home/silent/mt1.geojson',write_mode='AF')
+#a.export_vessels_to_web(mode='rewrite',nextgis_web_api_options=NGW_options)
 
 
 #a.init_NGW_resource_for_vessels({'user':'administrator','password':'cedutecedute32167','url':'http://ekazakov.nextgis.com','resource_id':0}, 'monya', 'manya')
