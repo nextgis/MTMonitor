@@ -6,13 +6,16 @@ Python-класс, обеспечивающий взаимодействие с 
   - Запрос судов в произвольной области (передача границ поиска вместе с запросом, PS06)
 
 Подробности о методах API можно найти в документации:
+
 https://www.marinetraffic.com/ru/ais-api-services/detail/ps05/vessel-positions-in-a-predefined-area
+
 https://www.marinetraffic.com/ru/ais-api-services/detail/ps06/vessel-positions-in-a-custom-area/
 
 ## Установка
 
 ### Зависимости
 Все пакеты, необходимые для работы MTMonitor, доступны в стандартных репозиториях Python:
+
 requests, pyproj, shapely, fiona
 
 ## Инициализация
@@ -24,6 +27,7 @@ monitor = MTMonitor('<your API key>',mode='Predefined', monitoring_area_source='
 ```
 
 Для работы с PS05 используйте значение поля mode='Predifined'
+
 Для работы с PS05 используйте значение поля mode='Custom'
 
 **Важно!** Если при работе с predifined area (PS05) указан OGR-источник данных с границей (monitoring_area_source), то полученные данные будут обрезаться по этим границам. OGR-источник должен содержать полигоны и может быть в любой системе координат с определенным кодом EPSG. Полигонов в наборе может быть любое число.
