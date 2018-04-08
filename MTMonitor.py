@@ -258,7 +258,7 @@ class MTMonitor():
 
         output.close()
 
-    def export_vessels_to_web(self, nextgis_web_api_options, mode='rewrite'):
+    def export_vessels_to_web(self, nextgis_web_api_options, write_mode='rewrite'):
         """
         Export vessels NextGIS Web
 
@@ -274,17 +274,17 @@ class MTMonitor():
         1. rewrite - all existing in resource features will be deleted, then write new vessels
         2. append - append new vessels to existing features
 
-        :param mode: 'rewrite' or 'append'.
+        :param write_mode: 'rewrite' or 'append'.
         :param nextgis_web_api_options: All necessary API options as dict: {'url':'', 'username':'', 'password':'', 'resource_id': 0}
         """
 
-        if mode == 'rewrite':
+        if write_mode == 'rewrite':
             self.__delete_all_features_from_NGW_resource(nextgis_web_api_options)
             for vessel in self.last_vessels_response:
                 vessel_ngw = self.__describe_vessel_for_NGW(vessel)
                 self.__add_feature_to_NGW_resource(vessel_ngw, nextgis_web_api_options)
 
-        elif mode == 'append':
+        elif write_mode == 'append':
             for vessel in self.last_vessels_response:
                 vessel_ngw = self.__describe_vessel_for_NGW(vessel)
                 self.__add_feature_to_NGW_resource(vessel_ngw, nextgis_web_api_options)
@@ -535,37 +535,3 @@ class MTMonitor():
             return True
         else:
             return False
-
-
-#initer = MT_NGW_init_schemes(0,'a','b')
-#initer.get_init_mapserver_style(4)
-
-NGW_options = {'user':'administrator','password':'cedutecedute32167','url':'http://ekazakov.nextgis.com','resource_id':25}
-
-a = MTMonitor('c889f60d987ade091f0f92c0d714eb6d094302f9',mode='Predefined', monitoring_area_source='data/1694.geojson')
-#a.automated_vessels_to_web(NGW_options, run_period=0.5, emulation=True, write_mode='rewrite')
-#a.automated_vessels_to_file('/home/silent/mt_auto.geojson',write_mode='RF',run_period=0.5, emulation=True)
-
-
-print a.get_vessels(emulation=True)
-
-#a.export_vessels_to_file('/home/silent/mt1.geojson',write_mode='AF')
-#a.export_vessels_to_web(mode='rewrite',nextgis_web_api_options=NGW_options)
-
-
-#a.init_NGW_resource_for_vessels({'user':'administrator','password':'cedutecedute32167','url':'http://ekazakov.nextgis.com','resource_id':0}, 'monya', 'manya')
-#a.delete_all_features_from_NGW_resource({'user':'administrator','password':'cedutecedute32167','url':'http://ekazakov.nextgis.com','resource_id':12})
-
-#a.get_vessels(200, emulation=True)
-#vessel0 = a.last_vessels_response[0]
-#described_vessel0 = a.describe_vessel_for_NGW(vessel0)
-#print a.add_feature_to_NGW_resource(described_vessel0,{'user':'administrator','password':'cedutecedute32167','url':'http://ekazakov.nextgis.com','resource_id':25})
-#a.export_vessels_to_file('/home/silent/test_MT2.geojson')
-#b = a.get_vessels(200, emulation=True)
-#print b
-#print a.monitoring_area_full_shapes
-#print a.monitoring_areas
-#print a.last_vessels_response
-
-#{u'errors': [{u'code': u'4', u'detail': u'SERVICE INACTIVE'}]}
-#{u'errors': [{u'code': u'5', u'detail': u'ABOVE SERVICE CALL LIMIT'}]}
