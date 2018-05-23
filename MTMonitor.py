@@ -134,6 +134,7 @@ class MTMonitor():
 
             if self.mode == 'Predefined':
                 vessels = self.__marine_traffic_vp_in_predifined_area_request(time_period)
+                print vessels
                 if self.monitoring_areas:
                     for area in self.monitoring_areas:
                         #print 'Vessels:'
@@ -164,6 +165,7 @@ class MTMonitor():
 
 
         # Writing attributes NEW for new vessels and REQUEST_TIME
+        print vessels_filtered
         for vessel_new_response in vessels_filtered:
             vessel_new_response['REQUEST_TIME'] = request_time
             vessel_new_response['NEW'] = True
@@ -441,7 +443,7 @@ class MTMonitor():
     def __marine_traffic_vp_in_custom_area_request (self, timespan, MINLAT, MAXLAT, MINLON, MAXLON):
         #print '%s/%s/MINLAT:%s/MAXLAT:%s/MINLON:%s/MAXLON:%s/timespan:%s/protocol:jsono' % (self.MT_API_gate, self.MT_API_Key, MINLAT, MAXLAT, MINLON, MAXLON, timespan)
         r_loaded = []
-        r = requests.get('%s/%s/MINLAT:%s/MAXLAT:%s/MINLON:%s/MAXLON:%s/timespan:%s/protocol:json' % (self.MT_API_gate, self.MT_API_Key, MINLAT, MAXLAT, MINLON, MAXLON, timespan))
+        r = requests.get('%s/%s/MINLAT:%s/MAXLAT:%s/MINLON:%s/MAXLON:%s/timespan:%s/protocol:jsono' % (self.MT_API_gate, self.MT_API_Key, MINLAT, MAXLAT, MINLON, MAXLON, timespan))
         r_loaded = json.loads(r.text)
         #print r_loaded
         return r_loaded
@@ -449,7 +451,7 @@ class MTMonitor():
     def __marine_traffic_vp_in_predifined_area_request(self, timespan):
         #print '%s/%s/timespan:%s/protocol:jsono' % (self.MT_API_gate, self.MT_API_Key, timespan)
         r_loaded = []
-        r = requests.get('%s/%s/timespan:%s/protocol:json' % (self.MT_API_gate, self.MT_API_Key, timespan))
+        r = requests.get('%s/%s/timespan:%s/protocol:jsono' % (self.MT_API_gate, self.MT_API_Key, timespan))
         #print r.text
         r_loaded = json.loads(r.text)
         #print r_loaded
