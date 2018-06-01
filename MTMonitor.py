@@ -427,6 +427,7 @@ class MTMonitor():
                           auth=(nextgis_web_api_options['user'], nextgis_web_api_options['password']))
         # print r.text
         r_loaded = json.loads(r.text)
+        print r_loaded
         new_resource_id = r_loaded['id']
 
         style = scheme_init.get_init_mapserver_style(new_resource_id)
@@ -506,7 +507,7 @@ class MTMonitor():
     def __add_feature_to_NGW_resource(self, feature, nextgis_web_api_options):
         url = urljoin(nextgis_web_api_options['url'],'api/resource/%s/feature/' % nextgis_web_api_options['resource_id'])
         r = requests.post(url, data=feature, auth=(nextgis_web_api_options['user'], nextgis_web_api_options['password']))
-        #print r.text
+
         r_loaded = json.loads(r.text)
         return r_loaded
 
@@ -522,6 +523,7 @@ class MTMonitor():
         r = requests.get(url, auth=(nextgis_web_api_options['user'], nextgis_web_api_options['password']))
         #print r.text
         r_loaded = json.loads(r.text)
+
         return r_loaded
 
     def __describe_vessel_for_NGW(self, vessel_record, crs_id='epsg:3857'):
