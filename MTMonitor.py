@@ -390,11 +390,15 @@ class MTMonitor():
         start_time = time.time()
         while True:
             print 'Performing request...'
-            self.get_vessels(time_period=time_period, emulation=emulation)
+            try:
+                self.get_vessels(time_period=time_period, emulation=emulation)
 
-            self.export_vessels_to_web(nextgis_web_api_options, write_mode)
+                self.export_vessels_to_web(nextgis_web_api_options, write_mode)
 
-            time.sleep(run_period * 60.0 - ((time.time() - start_time) % (run_period * 60.0)))
+                time.sleep(run_period * 60.0 - ((time.time() - start_time) % (run_period * 60.0)))
+            except Exception as e:
+                print 'Exception while performing request! Text: %s' % str(e)
+                time.sleep(run_period * 60.0 - ((time.time() - start_time) % (run_period * 60.0)))
 
     def init_NGW_resource_for_vessels(self, nextgis_web_api_options, display_name, keyname):
         """
