@@ -35,8 +35,9 @@ class MTMonitor():
     default_run_period = 5  # In minutes
     monitoring_areas = []
     last_vessels_response = []
+    log_file = 'log.txt'
 
-    def __init__(self, MT_API_Key, mode='Predefined', monitoring_area_source=None):
+    def __init__(self, MT_API_Key, mode='Predefined', monitoring_area_source=None, log_file=None):
         """
         Class initialization.
         Inputs are MarineTraffic API Key, mode and (optionally) OGR source with region of interest
@@ -68,10 +69,13 @@ class MTMonitor():
         self.MT_API_Key = MT_API_Key
 
         if mode not in ['Predefined','Custom']:
-            print 'Invalid mode. Valid options are: Predefined, Custom. Auto set to Predefined'
+            self.log_message('Invalid mode. Valid options are: Predefined, Custom. Auto set to Predefined')
             self.mode = 'Predefined'
         else:
             self.mode = mode
+
+        if log_file:
+            self.log_file = log_file
 
         if monitoring_area_source:
             source_dataset = fiona.open(monitoring_area_source)
@@ -86,6 +90,14 @@ class MTMonitor():
             for feature in monitoring_area_full_shapes:
                 self.monitoring_areas.append({'geometry':feature,'bounds':self.__get_bounds_from_coordinates(feature)})
 
+
+    def log_message(self, message):
+        if not os.path.exists(self.log_file):
+            with open(self.log_file, 'w') as fl:
+                pass
+
+        with open(self.log_file,'a') as fl:
+            fl.write('%s | %s \n' % (datetime.now().strftime('%Y-%m-%dT%H:%M:%S'), message))
 
     def get_vessels(self, time_period=None, emulation=False):
         """
@@ -134,7 +146,7 @@ class MTMonitor():
 
             if self.mode == 'Predefined':
                 vessels = self.__marine_traffic_vp_in_predifined_area_request(time_period)
-                print vessels
+                self.log_message(vessels)
                 if self.monitoring_areas:
                     for area in self.monitoring_areas:
                         #print 'Vessels:'
@@ -147,8 +159,8 @@ class MTMonitor():
 
             elif self.mode == 'Custom':
                 if not self.monitoring_areas:
-                    print 'Monitoring area must be specified. Provide it with option monitoring_area_source while' \
-                          'class object initialization'
+                    self.log_message('Monitoring area must be specified. Provide it with option monitoring_area_source while' \
+                          'class object initialization')
                     return vessels_filtered
                 else:
                     for area in self.monitoring_areas:
@@ -165,7 +177,7 @@ class MTMonitor():
 
 
         # Writing attributes NEW for new vessels and REQUEST_TIME
-        print vessels_filtered
+        self.log_message(vessels_filtered)
         for vessel_new_response in vessels_filtered:
             vessel_new_response['REQUEST_TIME'] = request_time
             vessel_new_response['NEW'] = True
@@ -233,7 +245,7 @@ class MTMonitor():
             for feature in features:
                 output.write(feature[1])
         else:
-            print 'unsupported mode'
+            self.log_message('unsupported mode')
             return
 
         for vessel in self.last_vessels_response:
@@ -279,7 +291,7 @@ class MTMonitor():
         :param write_mode: 'rewrite' or 'append'.
         :param nextgis_web_api_options: All necessary API options as dict: {'url':'', 'username':'', 'password':'', 'resource_id': 0}
         """
-
+        self.log_message('Last vessels: %s' % str(self.last_vessels_response))
         if write_mode == 'rewrite':
             self.__delete_all_features_from_NGW_resource(nextgis_web_api_options)
             for vessel in self.last_vessels_response:
@@ -328,7 +340,7 @@ class MTMonitor():
 
         start_time = time.time()
         while True:
-            print 'Performing request...'
+            self.log_message('Performing request...')
             self.get_vessels(time_period=time_period, emulation=emulation)
 
             if write_mode == 'new':
@@ -346,7 +358,7 @@ class MTMonitor():
             elif write_mode == 'rewrite':
                 self.export_vessels_to_file(output_file, output_type=output_type, write_mode=write_mode)
             else:
-                print 'Unsupported mode'
+                self.log_message('Unsupported mode')
                 break
 
             time.sleep(run_period * 60.0 - ((time.time() - start_time) % (run_period * 60.0)))
@@ -389,7 +401,7 @@ class MTMonitor():
 
         start_time = time.time()
         while True:
-            print 'Performing request...'
+            self.log_message('Performing request...')
             try:
                 self.get_vessels(time_period=time_period, emulation=emulation)
 
@@ -397,7 +409,7 @@ class MTMonitor():
 
                 time.sleep(run_period * 60.0 - ((time.time() - start_time) % (run_period * 60.0)))
             except Exception as e:
-                print 'Exception while performing request! Text: %s' % str(e)
+                self.log_message('Exception while performing request! Text: %s' % str(e))
                 time.sleep(run_period * 60.0 - ((time.time() - start_time) % (run_period * 60.0)))
 
     def init_NGW_resource_for_vessels(self, nextgis_web_api_options, display_name, keyname):
@@ -431,7 +443,7 @@ class MTMonitor():
                           auth=(nextgis_web_api_options['user'], nextgis_web_api_options['password']))
         # print r.text
         r_loaded = json.loads(r.text)
-        print r_loaded
+        self.log_message(r_loaded)
         new_resource_id = r_loaded['id']
 
         style = scheme_init.get_init_mapserver_style(new_resource_id)
